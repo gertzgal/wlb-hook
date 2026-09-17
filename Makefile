@@ -25,3 +25,8 @@ seed:            ## generate 6 weeks of fake events for the future calendar
 
 dev:             ## start Claude Code with this plugin loaded, debug log to /tmp
 	claude --plugin-dir . --debug-file /tmp/wlb-hook-debug.log
+
+dashboard:       ## calendar dashboard on the seeded demo events (http://localhost:5178)
+	$(MAKE) seed
+	cd dashboard && [ -d node_modules ] || npm install
+	cd dashboard && WLB_EVENTS_FILE=/tmp/wlb-demo-events.jsonl npm run dev
