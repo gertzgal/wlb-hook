@@ -47,6 +47,18 @@ button { font: inherit; color: inherit; }
 .range { margin: 0; font-family: var(--serif); font-size: 18px; color: var(--ink-soft); }
 .warn { color: var(--clay-ink); }
 
+/* screen time (masthead) */
+.screentime { text-align: right; }
+.screentime p { margin: 0; }
+.st-big { font-family: var(--serif); font-size: 40px; line-height: 1; font-variation-settings: "opsz" 144; }
+.st-sub { font-size: 18px; color: var(--ink-faint); }
+.st-limit { display: flex; align-items: center; gap: 10px; justify-content: flex-end; margin-top: 12px; font-size: 13px; color: var(--ink-soft); }
+.st-limit input { width: 140px; accent-color: var(--clay); }
+.st-limit b { font-weight: 600; font-variant-numeric: tabular-nums; min-width: 4ch; text-align: left; }
+.st-verdict { font-size: 13px; margin-top: 4px !important; }
+.st-verdict.over { color: var(--clay-ink); }
+.st-verdict.under { color: var(--olive); }
+
 /* hero excuse */
 .hero { margin: 0 0 72px; padding-left: 4px; }
 .hero-lead { margin: 0 0 18px; color: var(--clay-ink); font-size: 14px; }
@@ -173,6 +185,17 @@ button { font: inherit; color: inherit; }
   font-variation-settings: "opsz" 24;
 }
 .note { font-size: 13px; color: var(--ink-soft); margin-top: auto; }
+
+/* per-day Claude screen time */
+.usage { display: flex; align-items: center; gap: 6px; margin-top: auto; padding-top: 4px; }
+.excuse + .usage, .note + .usage { margin-top: 4px; }
+.usage-bar { flex: 1; height: 4px; border-radius: 2px; background: rgba(42,36,32,.10); overflow: hidden; }
+.usage-fill { display: block; height: 100%; background: var(--olive); border-radius: 2px; }
+.day.over-limit .usage-fill { background: var(--clay); }
+.usage-txt { font-size: 11px; color: var(--ink-soft); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.day.over-limit .usage-txt { color: var(--clay-ink); }
+.day.weekend .usage-txt, .day.weekend .num { color: var(--ink-faint); }
+.usage-pill.over { color: var(--clay-ink); }
 .day.stopped .note { color: var(--olive); }
 
 /* detail */
@@ -214,6 +237,9 @@ button { font: inherit; color: inherit; }
   .day { min-height: 72px; padding: 6px; }
   .excuse { font-size: 13px; -webkit-line-clamp: 2; }
   .hrs { display: none; }
+  .usage-txt { display: none; }
+  .screentime { text-align: left; }
+  .st-limit { justify-content: flex-start; }
 }
 
 @media (prefers-reduced-motion: reduce) {

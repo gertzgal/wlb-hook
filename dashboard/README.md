@@ -11,3 +11,10 @@ npm run dev                                                # your real ~/.claude
 Opens on http://localhost:5178. The page polls the file every 2 s, so a gate answered in a
 running `make demo` session shows up on today's cell. Drop any `events.jsonl` onto the page to
 read a different record.
+
+## Screen time
+
+The masthead shows your average daily time in Claude and a per-day limit slider (Apple
+Screen Time style; default 4 h, saved in the browser's localStorage). Each calendar cell carries a
+usage bar; days past the limit turn clay. Usage comes from `"kind": "usage"` events with
+`usage_hours`, one per day. `make seed` generates them; the hook does not record them yet.

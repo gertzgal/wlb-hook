@@ -7,7 +7,7 @@ Usage:
 One JSON object per line. Event shape (shared with the hook):
 
     {"ts": "<ISO-8601 local time with offset>", "date": "YYYY-MM-DD",
-     "kind": "gate" | "stop" | "one_last" | "workaholic",
+     "kind": "gate" | "stop" | "one_last" | "workaholic" | "usage",
      "worked_hours": <float, 1dp>, "budget_hours": 9,
      "excuse": "<str, workaholic only>", "session_id": "<uuid4>", "cwd": "<str>"}
 
@@ -18,7 +18,9 @@ Semantics:
   * Workaholic day: one gate+workaholic pair, then nothing more.
   * Stop day: 1-3 gate+stop pairs a few minutes apart.
   * One-last day: gate+one_last, then ~5 min later gate+stop or gate+workaholic.
-  * Weekdays only. ~70% of weekdays are normal (no events); the rest split
+  * ``usage`` event: one per day, ``usage_hours`` = time actively spent in Claude
+    that day (screen time). Weekdays ~95%, weekends ~20%. Written at end of day.
+  * Gates on weekdays only. ~70% of weekdays are normal (no events); the rest split
     ~40% stop / ~30% one_last / ~30% workaholic.
 """
 
@@ -168,6 +170,32 @@ def day_events(rng: random.Random, day: dt.date, tz: dt.tzinfo) -> list[dict]:
     return events
 
 
+def usage_event(rng: random.Random, day: dt.date, tz: dt.tzinfo, gated: bool) -> list[dict]:
+    """Claude screen time for the day: how long Claude was actively in use."""
+    weekend = day.weekday() >= 5
+    if rng.random() > (0.20 if weekend else 0.95):
+        return []
+    if weekend:
+        hours = rng.uniform(0.3, 1.8)
+    elif gated:
+        hours = rng.uniform(4.5, 8.0)
+    else:
+        hours = rng.uniform(1.5, 5.0)
+    when = dt.datetime.combine(day, dt.time(23, 59)).replace(tzinfo=tz)
+    return [
+        {
+            "ts": when.isoformat(timespec="seconds"),
+            "date": day.isoformat(),
+            "kind": "usage",
+            "usage_hours": round(hours, 1),
+            "worked_hours": 0,
+            "budget_hours": BUDGET_HOURS,
+            "session_id": str(uuid.UUID(int=rng.getrandbits(128), version=4)),
+            "cwd": rng.choice(PROJECTS),
+        }
+    ]
+
+
 def generate(weeks: int, seed: int, end: dt.date) -> list[dict]:
     rng = random.Random(seed)
     tz = local_tz()
@@ -175,8 +203,11 @@ def generate(weeks: int, seed: int, end: dt.date) -> list[dict]:
     events: list[dict] = []
     day = start
     while day <= end:
+        gated: list[dict] = []
         if day.weekday() < 5:
-            events += day_events(rng, day, tz)
+            gated = day_events(rng, day, tz)
+        events += gated
+        events += usage_event(rng, day, tz, bool(gated))
         day += dt.timedelta(days=1)
     return events
 

@@ -25,15 +25,37 @@ const STATE_LABEL: Record<DaySummary["state"], string> = {
   ignored: "ignored the gate",
 };
 
+const LIMIT_KEY = "wlb.screenTimeLimitHours";
+const DEFAULT_LIMIT = 4;
+
+/** Screen-time limit for Claude per day, like Apple's per-app limit. Stored in the browser. */
+function useScreenTimeLimit(): [number, (h: number) => void] {
+  const [limit, setLimit] = useState<number>(() => {
+    const v = Number(localStorage.getItem(LIMIT_KEY));
+    return v > 0 ? v : DEFAULT_LIMIT;
+  });
+  const set = (h: number) => {
+    const v = Math.min(12, Math.max(0.5, h));
+    setLimit(v);
+    localStorage.setItem(LIMIT_KEY, String(v));
+  };
+  return [limit, set];
+}
+
 export default function App() {
   const src = useEvents();
+  const [limit, setLimit] = useScreenTimeLimit();
   const [dragging, setDragging] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const today = useMemo(() => new Date(), [src.updatedAt]);
   const todayIso = isoDate(today);
 
   const weeks = useMemo(() => buildWeeks(src.events, today), [src.events, today]);
-  const stats = useMemo(() => computeStats(weeks, today), [weeks, today]);
+  const stats = useMemo(() => {
+    const base = computeStats(weeks, today);
+    const overLimitDays = weeks.flatMap((w) => w.days).filter((d) => d.date <= todayIso && d.usageHours > limit).length;
+    return { ...base, overLimitDays };
+  }, [weeks, today, limit, todayIso]);
 
   const longest = useMemo(() => {
     let best: DaySummary | undefined;
@@ -82,8 +104,26 @@ export default function App() {
       onDrop={onDrop}
     >
       <header className="masthead">
-        <p className="kicker">Your last six weeks with Claude Code</p>
-        <p className="range">{range}</p>
+        <div>
+          <p className="kicker">Your last six weeks with Claude Code</p>
+          <p className="range">{range}</p>
+        </div>
+        <div className="screentime">
+          <p className="st-big">
+            {stats.usageDays ? hours(stats.avgUsageHours) : "—"}
+            <span className="st-sub"> / day</span>
+          </p>
+          <p className="stat-label">average time in Claude{stats.usageDays ? `, over ${stats.usageDays} days` : ""}</p>
+          <label className="st-limit">
+            <span>Daily limit</span>
+            <input type="range" min={0.5} max={12} step={0.5} value={limit} onChange={(e) => setLimit(Number(e.target.value))} />
+            <b>{hours(limit)}</b>
+          </label>
+          <p className={"st-verdict " + (stats.avgUsageHours > limit ? "over" : "under")}>
+            {stats.usageDays === 0 ? "no usage recorded yet" : Math.abs(stats.avgUsageHours - limit) < 0.05 ? "right at your limit on average" : stats.avgUsageHours > limit ? `${hours(stats.avgUsageHours - limit)} over your limit on average` : `${hours(limit - stats.avgUsageHours)} under your limit on average`}
+            {stats.overLimitDays > 0 && ` · ${stats.overLimitDays} ${stats.overLimitDays === 1 ? "day" : "days"} over`}
+          </p>
+        </div>
       </header>
 
       {hero && (
@@ -140,7 +180,7 @@ export default function App() {
             <div className="week" key={w.days[0].date}>
               <span className="month-gutter">{label}</span>
               {w.days.map((d) => (
-                <DayCell key={d.date} day={d} todayIso={todayIso} selected={selected === d.date} onSelect={() => setSelected(selected === d.date ? null : d.date)} />
+                <DayCell key={d.date} day={d} todayIso={todayIso} limit={limit} selected={selected === d.date} onSelect={() => setSelected(selected === d.date ? null : d.date)} />
               ))}
             </div>
           );
@@ -153,6 +193,7 @@ export default function App() {
             <h2>{fmtLong(sel.date)}</h2>
             <span className={"pill " + sel.state}>{STATE_LABEL[sel.state]}</span>
             <span className="muted">{hours(sel.peakHours)} of a {sel.budget} h budget{sel.project ? `, in ${sel.project}` : ""}</span>
+            {sel.usageHours > 0 && <span className={"muted usage-pill" + (sel.usageHours > limit ? " over" : "")}>{hours(sel.usageHours)} in Claude{sel.usageHours > limit ? `, ${hours(sel.usageHours - limit)} over the ${hours(limit)} limit` : ""}</span>}
             <button className="close" onClick={() => setSelected(null)} aria-label="Close">×</button>
           </div>
           <ol className="timeline">
@@ -203,15 +244,17 @@ function Stat({ big, sub, label }: { big: string; sub?: string; label: string })
   );
 }
 
-function DayCell({ day, todayIso, selected, onSelect }: { day: DaySummary; todayIso: string; selected: boolean; onSelect: () => void }) {
+function DayCell({ day, todayIso, limit, selected, onSelect }: { day: DaySummary; todayIso: string; limit: number; selected: boolean; onSelect: () => void }) {
   const d = fromIso(day.date);
   const weekend = isWeekend(d);
   const future = day.date > todayIso;
   const isToday = day.date === todayIso;
-  const cls = ["day", day.state, weekend ? "weekend" : "", future ? "future" : "", isToday ? "today" : "", selected ? "selected" : ""].join(" ");
+  const over = day.usageHours > limit;
+  const cls = ["day", day.state, weekend ? "weekend" : "", future ? "future" : "", isToday ? "today" : "", selected ? "selected" : "", over ? "over-limit" : ""].join(" ");
+  const usageLine = day.usageHours > 0 ? `\n${hours(day.usageHours)} in Claude${over ? ` (over the ${hours(limit)} limit)` : ""}` : "";
   const title = day.events.length
-    ? `${fmtLong(day.date)} — ${STATE_LABEL[day.state]}, ${hours(day.peakHours)}${day.project ? ` in ${day.project}` : ""}${day.excuse ? `\n“${day.excuse}”` : ""}`
-    : fmtLong(day.date);
+    ? `${fmtLong(day.date)} — ${STATE_LABEL[day.state]}, ${hours(day.peakHours)}${day.project ? ` in ${day.project}` : ""}${day.excuse ? `\n“${day.excuse}”` : ""}${usageLine}`
+    : fmtLong(day.date) + usageLine;
   const interactive = day.events.length > 0;
   return (
     <button className={cls} title={title} onClick={interactive ? onSelect : undefined} tabIndex={interactive ? 0 : -1} aria-pressed={selected}>
@@ -228,6 +271,12 @@ function DayCell({ day, todayIso, selected, onSelect }: { day: DaySummary; today
       ) : day.state === "ignored" ? (
         <span className="note">gate left open</span>
       ) : null}
+      {day.usageHours > 0 && (
+        <span className="usage" title={`${hours(day.usageHours)} in Claude`}>
+          <span className="usage-bar"><span className="usage-fill" style={{ width: `${Math.min(100, (day.usageHours / Math.max(limit, 0.5)) * 100)}%` }} /></span>
+          <span className="usage-txt">{hours(day.usageHours)}</span>
+        </span>
+      )}
     </button>
   );
 }
