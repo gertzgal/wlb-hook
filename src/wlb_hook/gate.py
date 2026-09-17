@@ -13,7 +13,10 @@ def user_prompt_submit(payload: dict[str, Any]) -> dict[str, Any] | None:
     first = store.first_prompt_override() or core.first_prompt_today(store.history_lines(), now)
     worked = core.worked_hours(first, now)
     events = store.events_today(today)
-    if not core.should_gate(worked, budget, core.is_unlocked(events)):
+    state = core.day_state(events)
+    if state == "stopped":
+        return core.stopped_outcome(events)
+    if not core.should_gate(worked, budget, state == "unlocked"):
         return None
 
     base = {

@@ -47,6 +47,36 @@ def test_over_budget_stop_blocks_and_logs(tmp_path):
     assert [e["kind"] for e in events(tmp_path)] == ["gate", "stop"]
 
 
+def test_stop_hard_blocks_rest_of_day_without_dialog(tmp_path):
+    env = dict(WLB_FIRST_PROMPT_AT="2026-09-17T09:00:00")
+    run_hook(tmp_path, WLB_DIALOG_RESULT="stop", **env)
+    again = run_hook(tmp_path, WLB_DIALOG_RESULT="workaholic:should not be asked", **env)
+    assert "stopped for the day" in json.loads(again.stdout)["reason"]
+    assert [e["kind"] for e in events(tmp_path)] == ["gate", "stop"]
+
+
+def test_budget_precedence_config_beats_plugin_option(tmp_path):
+    (tmp_path / "config.json").write_text('{"max_hours": 2}')
+    env = dict(WLB_FIRST_PROMPT_AT="2026-09-17T16:00:00", WLB_CONFIG_FILE=str(tmp_path / "config.json"),
+               WLB_DIALOG_RESULT="stop")
+    assert json.loads(run_hook(tmp_path, CLAUDE_PLUGIN_OPTION_MAX_HOURS="12", **env).stdout)["decision"] == "block"
+    assert run_hook(tmp_path / "x", CLAUDE_PLUGIN_OPTION_MAX_HOURS="12",
+                    WLB_FIRST_PROMPT_AT="2026-09-17T16:00:00").stdout.strip() == ""
+
+
+def test_wlb_command_sets_budget_and_reports_status(tmp_path):
+    env = {**os.environ, "WLB_CONFIG_FILE": str(tmp_path / "config.json"),
+           "WLB_EVENTS_FILE": str(tmp_path / "events.jsonl"), "WLB_HISTORY_FILE": str(tmp_path / "none"),
+           "WLB_FIRST_PROMPT_AT": "2026-09-17T09:00:00", "WLB_NOW": "2026-09-17T12:00:00"}
+    script = str(ROOT / "scripts" / "wlb.py")
+    out = subprocess.run([sys.executable, script, "set", "7.5"], capture_output=True, text=True,
+                         env=env, check=True).stdout
+    assert "7h 30m" in out and json.loads((tmp_path / "config.json").read_text())["max_hours"] == 7.5
+    status = subprocess.run([sys.executable, script], capture_output=True, text=True, env=env,
+                            check=True).stdout
+    assert "worked 3h 00m of 7h 30m" in status and "day state: open" in status
+
+
 def test_config_budget_respected(tmp_path):
     (tmp_path / "config.json").write_text('{"max_hours": 2}')
     proc = run_hook(tmp_path, WLB_FIRST_PROMPT_AT="2026-09-17T16:00:00",

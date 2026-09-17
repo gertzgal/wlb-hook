@@ -46,13 +46,32 @@ def worked_hours(first_prompt: datetime | None, now: datetime) -> float:
     return max(0.0, (now - first_prompt).total_seconds() / 3600)
 
 
+def day_state(events_today: list[dict[str, Any]]) -> str:
+    """'unlocked' (a workaholic Choice today), 'stopped' (a stop Choice today), else 'open'."""
+    kinds = {e.get("kind") for e in events_today}
+    if "workaholic" in kinds:
+        return "unlocked"
+    if "stop" in kinds:
+        return "stopped"
+    return "open"
+
+
 def is_unlocked(events_today: list[dict[str, Any]]) -> bool:
-    """Workaholic mode: any workaholic Choice today unlocks the rest of the Workday."""
-    return any(e.get("kind") == "workaholic" for e in events_today)
+    return day_state(events_today) == "unlocked"
 
 
 def should_gate(worked: float, budget: float, unlocked: bool) -> bool:
     return not unlocked and worked > budget
+
+
+def stopped_outcome(events_today: list[dict[str, Any]]) -> dict[str, Any]:
+    """Hard block for the rest of the Workday after a Stop."""
+    stop = next(e for e in events_today if e.get("kind") == "stop")
+    at = str(stop.get("ts", ""))[11:16]
+    return {
+        "decision": "block",
+        "reason": f"wlb-hook: you stopped for the day at {at}. Prompt dropped. See you tomorrow.",
+    }
 
 
 def fmt_hours(hours: float) -> str:
@@ -83,8 +102,8 @@ def outcome(choice: Choice, excuse: str | None, worked: float, budget: float) ->
     if choice == "stop":
         return {
             "decision": "block",
-            "reason": f"wlb-hook: you chose to stop after {fmt_hours(worked)}. Prompt dropped. "
-            "Close the laptop.",
+            "reason": f"wlb-hook: you chose to stop after {fmt_hours(worked)}. Prompt dropped; "
+            "you're done for today. Close the laptop.",
         }
     return {
         "decision": "block",

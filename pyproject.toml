@@ -22,4 +22,5 @@ ignore = ["E402"]  # hooks/*.py must extend sys.path before importing wlb_hook
 
 [tool.ruff.lint.per-file-ignores]
 "scripts/*" = ["PLR", "E501"]
+"tests/*" = ["PLR2004", "E501"]
 "src/wlb_hook/dialog.py" = ["PLR0911"]

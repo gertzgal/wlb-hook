@@ -31,13 +31,29 @@ def now() -> datetime:
     return dt.astimezone()
 
 
-def budget_hours() -> float:
-    if "WLB_MAX_HOURS" in os.environ:
-        return float(os.environ["WLB_MAX_HOURS"])
+def read_config() -> dict[str, Any]:
     try:
-        return float(json.loads(config_path().read_text()).get("max_hours", DEFAULT_BUDGET_HOURS))
-    except (OSError, ValueError, AttributeError):
-        return DEFAULT_BUDGET_HOURS
+        return json.loads(config_path().read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def write_config(cfg: dict[str, Any]) -> None:
+    path = config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(cfg, indent=2) + "\n")
+
+
+def budget_hours() -> float:
+    """Precedence: WLB_MAX_HOURS (demo) > config.json (/wlb set) > plugin option > default."""
+    for raw in (os.environ.get("WLB_MAX_HOURS"), read_config().get("max_hours"),
+                os.environ.get("CLAUDE_PLUGIN_OPTION_MAX_HOURS")):
+        try:
+            if raw not in (None, ""):
+                return float(raw)
+        except (TypeError, ValueError):
+            continue
+    return DEFAULT_BUDGET_HOURS
 
 
 def first_prompt_override() -> datetime | None:

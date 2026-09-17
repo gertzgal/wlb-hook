@@ -4,7 +4,7 @@ A Claude Code plugin that guards your work-life balance. Once today's work passe
 budget (default 9 hours, counted from your first CLI prompt of the day), every prompt is gated by
 a native macOS dialog:
 
-- **Stop**: the prompt is dropped. Next prompt gates again.
+- **Stop**: the prompt is dropped and you're done for the day. Further prompts are blocked without a dialog.
 - **One last prompt**: this prompt runs, the next one gates again.
 - **Workaholic**: unlocked until midnight, but you must type an excuse. It goes on your record.
 
@@ -19,16 +19,18 @@ claude --plugin-dir /path/to/wlb-hook       # load for one session
 
 ## Configure
 
-`~/.claude/wlb-hook/config.json`:
-
-```json
-{ "max_hours": 8 }
 ```
+/wlb            today's hours vs budget and day state
+/wlb set 8      set the daily budget (writes ~/.claude/wlb-hook/config.json)
+```
+
+When the plugin is enabled, Claude Code also asks for `max_hours` as a plugin option (editable in
+`/config`). Precedence: `WLB_MAX_HOURS` (demo) > `config.json` (`/wlb set`) > plugin option > 9.
 
 ## Demo (no 9-hour day required)
 
 ```bash
-make demo    # Claude Code with a fake first prompt 10 hours ago; events go to /tmp
+make demo    # Claude Code with a fake first prompt 10 hours ago; fresh day each run, events in /tmp
 make smoke   # fire the dialog once from the shell, no Claude session needed
 make seed    # 6 weeks of fake events for the future calendar -> /tmp/wlb-demo-events.jsonl
 ```
@@ -46,7 +48,7 @@ Overrides read by the hook: `WLB_FIRST_PROMPT_AT` (ISO local time), `WLB_NOW`, `
 ```
 
 `kind` is `gate` (dialog shown) followed by one of `stop` | `one_last` | `workaholic` with the same
-`ts` and `session_id`. A timeout leaves a lone `gate`.
+`ts` and `session_id`. A timeout leaves a lone `gate`. Prompts blocked after a `stop` are not logged.
 
 ## How it works
 
@@ -57,6 +59,7 @@ src/wlb_hook/core.py            pure logic (first prompt today, budget check, ou
 src/wlb_hook/store.py           config, event log, history.jsonl, WLB_* overrides
 src/wlb_hook/dialog.py          osascript wrapper; wlb_dialog.applescript is the dialog itself
 scripts/seed_demo_events.py     demo data generator
+scripts/wlb.py + skills/wlb/     the /wlb command
 ```
 
 Workday = first human prompt today in `~/.claude/history.jsonl` (CodexBar probes excluded) to now,

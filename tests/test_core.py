@@ -30,9 +30,16 @@ def test_should_gate_only_when_over_budget_and_not_unlocked():
     assert not core.should_gate(12, 9, unlocked=True)
 
 
-def test_workaholic_event_unlocks_day():
-    assert core.is_unlocked([{"kind": "gate"}, {"kind": "workaholic"}])
-    assert not core.is_unlocked([{"kind": "gate"}, {"kind": "one_last"}])
+def test_day_state():
+    assert core.day_state([]) == "open"
+    assert core.day_state([{"kind": "gate"}, {"kind": "one_last"}]) == "open"
+    assert core.day_state([{"kind": "gate"}, {"kind": "stop"}]) == "stopped"
+    assert core.day_state([{"kind": "gate"}, {"kind": "workaholic"}]) == "unlocked"
+
+
+def test_stopped_outcome_blocks_with_time():
+    out = core.stopped_outcome([{"kind": "gate"}, {"kind": "stop", "ts": "2026-09-17T19:27:34+03:00"}])
+    assert out["decision"] == "block" and "19:27" in out["reason"]
 
 
 def test_outcomes():
