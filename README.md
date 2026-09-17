@@ -30,9 +30,10 @@ When the plugin is enabled, Claude Code also asks for `max_hours` as a plugin op
 ## Demo (no 9-hour day required)
 
 ```bash
-make demo    # Claude Code with a fake first prompt 10 hours ago; fresh day each run, events in /tmp
-make smoke   # fire the dialog once from the shell, no Claude session needed
-make seed    # 6 weeks of fake events for the future calendar -> /tmp/wlb-demo-events.jsonl
+make demo      # Claude Code with a fake first prompt 10 hours ago; today's demo events reset each run
+make dashboard # calendar of the demo events on http://localhost:5178; run alongside `make demo` for a live gate
+make smoke     # fire the dialog once from the shell, no Claude session needed
+make seed      # 6 weeks of fake events for the future calendar -> /tmp/wlb-demo-events.jsonl
 ```
 
 Overrides read by the hook: `WLB_FIRST_PROMPT_AT` (ISO local time), `WLB_NOW`, `WLB_MAX_HOURS`,
