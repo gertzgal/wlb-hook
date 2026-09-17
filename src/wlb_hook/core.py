@@ -1,45 +1,112 @@
-"""Pure decision functions. Input: parsed hook stdin dict. Output: stdout JSON dict (or None).
+"""Pure decision logic for the work-life-balance Gate. No I/O here.
 
-Keep this module free of I/O so it can be unit-tested directly.
-Contract: https://code.claude.com/docs/en/hooks#json-output
+Terms (see CONTEXT.md): Workday, Budget, Gate, Choice (stop | one_last | workaholic), Excuse.
 """
 from __future__ import annotations
 
-import re
+import json
+from datetime import datetime
 from typing import Any
 
-# Example policy: deny obviously destructive shell commands.
-DENY_PATTERNS: tuple[tuple[str, str], ...] = (
-    (r"\brm\s+(-[a-zA-Z]*r[a-zA-Z]*f|-[a-zA-Z]*f[a-zA-Z]*r)\s+/(\s|$)", "recursive delete of /"),
-    (r"\bgit\s+push\b.*(--force\b|\s-f\b)", "force push"),
-)
+DEFAULT_BUDGET_HOURS = 9.0
+PROBE_MARKER = "ClaudeProbe"  # CodexBar's /usage probe also writes to history.jsonl
+
+Choice = str  # "stop" | "one_last" | "workaholic" | "timeout"
 
 
-def pre_tool_use(payload: dict[str, Any]) -> dict[str, Any] | None:
-    """Return a PreToolUse decision, or None to stay silent (allow by default)."""
-    if payload.get("tool_name") != "Bash":
-        return None
-    command = str(payload.get("tool_input", {}).get("command", ""))
-    for pattern, label in DENY_PATTERNS:
-        if re.search(pattern, command):
-            return {
-                "hookSpecificOutput": {
-                    "hookEventName": "PreToolUse",
-                    "permissionDecision": "deny",
-                    "permissionDecisionReason": f"wlb-hook: blocked {label}: {command!r}",
-                }
-            }
-    return None
+def first_prompt_today(history_lines: list[str], now: datetime) -> datetime | None:
+    """Earliest human CLI prompt on `now`'s local calendar day (~/.claude/history.jsonl lines)."""
+    today = now.date()
+    tz = now.tzinfo
+    earliest: datetime | None = None
+    for raw in history_lines:
+        line = raw.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if PROBE_MARKER in str(rec.get("project", "")):
+            continue
+        ts = rec.get("timestamp")
+        if not isinstance(ts, (int, float)):
+            continue
+        when = datetime.fromtimestamp(ts / 1000, tz=tz)
+        if when.date() != today:
+            continue
+        if earliest is None or when < earliest:
+            earliest = when
+    return earliest
 
 
-def user_prompt_submit(payload: dict[str, Any]) -> dict[str, Any] | None:
-    """Example: inject context when the prompt mentions a keyword."""
-    prompt = str(payload.get("prompt", ""))
-    if "wlb" in prompt.lower():
+def worked_hours(first_prompt: datetime | None, now: datetime) -> float:
+    if first_prompt is None:
+        return 0.0
+    return max(0.0, (now - first_prompt).total_seconds() / 3600)
+
+
+def day_state(events_today: list[dict[str, Any]]) -> str:
+    """'unlocked' (a workaholic Choice today), 'stopped' (a stop Choice today), else 'open'."""
+    kinds = {e.get("kind") for e in events_today}
+    if "workaholic" in kinds:
+        return "unlocked"
+    if "stop" in kinds:
+        return "stopped"
+    return "open"
+
+
+def is_unlocked(events_today: list[dict[str, Any]]) -> bool:
+    return day_state(events_today) == "unlocked"
+
+
+def should_gate(worked: float, budget: float, unlocked: bool) -> bool:
+    return not unlocked and worked > budget
+
+
+def stopped_outcome(events_today: list[dict[str, Any]]) -> dict[str, Any]:
+    """Hard block for the rest of the Workday after a Stop."""
+    stop = next(e for e in events_today if e.get("kind") == "stop")
+    at = str(stop.get("ts", ""))[11:16]
+    return {
+        "decision": "block",
+        "reason": f"wlb-hook: you stopped for the day at {at}. Prompt dropped. See you tomorrow.",
+    }
+
+
+def fmt_hours(hours: float) -> str:
+    h, m = int(hours), round((hours % 1) * 60)
+    return f"{h}h {m:02d}m" if h else f"{m}m"
+
+
+def gate_fact(worked: float, budget: float) -> str:
+    return (
+        f"You've been working for {fmt_hours(worked)} today. "
+        f"Your budget is {fmt_hours(budget)}.\n\nYou are overworking. What now?"
+    )
+
+
+def outcome(choice: Choice, excuse: str | None, worked: float, budget: float) -> dict[str, Any]:
+    """Hook JSON for a Choice made at the Gate."""
+    over = fmt_hours(worked - budget)
+    if choice == "one_last":
         return {
-            "hookSpecificOutput": {
-                "hookEventName": "UserPromptSubmit",
-                "additionalContext": "wlb-hook is active in this session.",
-            }
+            "systemMessage": f"wlb-hook: one last prompt granted ({over} over budget). "
+            "The next one will be gated again.",
         }
-    return None
+    if choice == "workaholic":
+        return {
+            "systemMessage": f"wlb-hook: workaholic mode until midnight. Excuse on record: "
+            f"“{excuse}”",
+        }
+    if choice == "stop":
+        return {
+            "decision": "block",
+            "reason": f"wlb-hook: you chose to stop after {fmt_hours(worked)}. Prompt dropped; "
+            "you're done for today. Close the laptop.",
+        }
+    return {
+        "decision": "block",
+        "reason": "wlb-hook: no answer at the overwork dialog. Prompt dropped; "
+        "resend it to choose again.",
+    }

@@ -1,6 +1,15 @@
 {
   "name": "wlb-hook",
   "version": "0.1.0",
-  "description": "Claude Code hook plugin boilerplate: pure decision core, thin stdin/stdout shims, fixture-driven tests.",
-  "author": { "name": "gertzgal" }
+  "description": "Work-life balance: gates your prompts once you have worked past your daily budget. Stop, one last prompt, or workaholic mode with an excuse.",
+  "author": {
+    "name": "gertzgal"
+  },
+  "userConfig": {
+    "max_hours": {
+      "type": "string",
+      "title": "Daily work budget (hours)",
+      "description": "Gate prompts once you've worked more than this many hours today. Default 9. Change later with /wlb set <hours>."
+    }
+  }
 }
