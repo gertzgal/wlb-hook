@@ -1,6 +1,6 @@
 {
   "name": "wlb-hook",
   "version": "0.1.0",
-  "description": "Claude Code hook plugin boilerplate: pure decision core, thin stdin/stdout shims, fixture-driven tests.",
+  "description": "Work-life balance: gates your prompts once you have worked past your daily budget. Stop, one last prompt, or workaholic mode with an excuse.",
   "author": { "name": "gertzgal" }
 }

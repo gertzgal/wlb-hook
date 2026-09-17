@@ -1,45 +1,71 @@
 # wlb-hook
 
-Claude Code hook plugin boilerplate. Layout follows Anthropic's shipped hook plugins
-(`hookify`, `security-guidance`) and the plugins reference; see
-[docs/research/claude-code-hooks-boilerplate.md](docs/research/claude-code-hooks-boilerplate.md)
-for the cited research.
+A Claude Code plugin that guards your work-life balance. Once today's work passes your daily
+budget (default 9 hours, counted from your first CLI prompt of the day), every prompt is gated by
+a native macOS dialog:
+
+- **Stop**: the prompt is dropped. Next prompt gates again.
+- **One last prompt**: this prompt runs, the next one gates again.
+- **Workaholic**: unlocked until midnight, but you must type an excuse. It goes on your record.
+
+Every gate and choice is appended to `~/.claude/wlb-hook/events.jsonl`, the data a calendar view
+of your overwork will read later.
+
+## Install / run
+
+```bash
+claude --plugin-dir /path/to/wlb-hook       # load for one session
+```
+
+## Configure
+
+`~/.claude/wlb-hook/config.json`:
+
+```json
+{ "max_hours": 8 }
+```
+
+## Demo (no 9-hour day required)
+
+```bash
+make demo    # Claude Code with a fake first prompt 10 hours ago; events go to /tmp
+make smoke   # fire the dialog once from the shell, no Claude session needed
+make seed    # 6 weeks of fake events for the future calendar -> /tmp/wlb-demo-events.jsonl
+```
+
+Overrides read by the hook: `WLB_FIRST_PROMPT_AT` (ISO local time), `WLB_NOW`, `WLB_MAX_HOURS`,
+`WLB_EVENTS_FILE`, `WLB_HISTORY_FILE`, `WLB_CONFIG_FILE`, `WLB_DIALOG_RESULT` (tests only:
+`stop` | `one_last` | `workaholic:<excuse>` | `timeout`).
+
+## Event log shape
+
+```json
+{"ts": "2026-09-17T19:27:34+03:00", "date": "2026-09-17", "kind": "workaholic",
+ "worked_hours": 10.0, "budget_hours": 9, "excuse": "the tests were almost green",
+ "session_id": "…", "cwd": "/Users/me/Projects/x"}
+```
+
+`kind` is `gate` (dialog shown) followed by one of `stop` | `one_last` | `workaholic` with the same
+`ts` and `session_id`. A timeout leaves a lone `gate`.
+
+## How it works
 
 ```
-.claude-plugin/plugin.json   manifest
-hooks/hooks.json             event -> matcher -> command (exec form, ${CLAUDE_PLUGIN_ROOT})
-hooks/<event>.py             thin entry points: stdin -> core -> stdout
-src/wlb_hook/core.py         pure decision logic, no I/O (unit-tested directly)
-src/wlb_hook/shim.py         JSON adapter; fails open with a systemMessage on internal error
-tests/fixtures/<Event>/      one stdin payload per scenario
-tests/test_core.py           unit tests
-tests/test_hooks_e2e.py      subprocess tests: fixture -> script, assert exit code + JSON
+hooks/hooks.json                UserPromptSubmit -> python3 hooks/user_prompt_submit.py (timeout 28 s)
+src/wlb_hook/gate.py            I/O orchestration: Workday -> gate? -> dialog -> log -> hook JSON
+src/wlb_hook/core.py            pure logic (first prompt today, budget check, outcome JSON)
+src/wlb_hook/store.py           config, event log, history.jsonl, WLB_* overrides
+src/wlb_hook/dialog.py          osascript wrapper; wlb_dialog.applescript is the dialog itself
+scripts/seed_demo_events.py     demo data generator
 ```
+
+Workday = first human prompt today in `~/.claude/history.jsonl` (CodexBar probes excluded) to now,
+local calendar day. Blocking uses `{"decision": "block", "reason"}`; allowing uses a
+`systemMessage`. The hook fails open on internal errors. Glossary in `CONTEXT.md`.
 
 ## Develop
 
 ```bash
-make test        # pytest (unit + e2e)
-make validate    # claude plugin validate . --strict
-make smoke       # pipe a fixture through a hook by hand
-make dev         # claude --plugin-dir . --debug-file /tmp/wlb-hook-debug.log
+make check       # ruff + plugin validate + pytest
+make dev         # claude --plugin-dir . with debug log at /tmp/wlb-hook-debug.log
 ```
-
-Inside the dev session run `/hooks` to confirm registration, `Ctrl+O` to see hook stderr in
-the transcript, and `grep -i hook /tmp/wlb-hook-debug.log` for stdout that is otherwise hidden.
-
-## Contract cheatsheet
-
-- Exit `0` with JSON on stdout to decide. Exit `2` blocks unconditionally. Exit `1` does **not**
-  block, and a missing script fails open. Timed-out `PreToolUse` hooks let the tool run.
-- `PreToolUse` decides via `hookSpecificOutput.permissionDecision` (`allow|deny|ask|defer`).
-  `PostToolUse`, `Stop`, `UserPromptSubmit` use top-level `decision: "block"` + `reason`.
-- `hookSpecificOutput.hookEventName` is required. `suppressOutput` is a documented no-op.
-- Default command timeout is 600 s. Set `timeout` explicitly (this repo uses 5 to 10 s).
-
-## Add a hook
-
-1. Add a decider `def <event>(payload) -> dict | None` in `src/wlb_hook/core.py`.
-2. Copy `hooks/pre_tool_use.py` to `hooks/<event>.py`, point it at the new decider.
-3. Register it in `hooks/hooks.json`. Add fixtures under `tests/fixtures/<Event>/` and tests.
-4. `make check`.

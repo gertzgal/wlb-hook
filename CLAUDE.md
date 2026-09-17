@@ -8,4 +8,4 @@ Read `map.md` before starting work; claim a ticket by setting its `assignee`, re
 setting `status: closed`, and adding a line to the map's Decisions so far. See its README for the frontier query.
 
 ## Dev
-`make test`, `make validate`, `make dev` (see README).
+`make check` (lint + validate + tests), `make demo`, `make smoke`, `make seed` (see README).

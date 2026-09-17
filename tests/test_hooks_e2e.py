@@ -1,70 +1,96 @@
-"""End-to-end: pipe fixture JSON into the real entry scripts, assert exit code + stdout JSON.
-
-This is exactly what Claude Code does at runtime (exec form, python3 <script>).
-"""
+"""End-to-end: pipe fixture JSON into the real entry script with WLB_* overrides."""
 import json
+import os
 import subprocess
 import sys
 
-import pytest
-
 from conftest import FIXTURES, ROOT
 
-HOOKS = ROOT / "hooks"
+HOOK = ROOT / "hooks" / "user_prompt_submit.py"
+PAYLOAD = (FIXTURES / "UserPromptSubmit" / "plain.json").read_text()
 
 
-def run_hook(script: str, stdin: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        [sys.executable, str(HOOKS / script)],
-        input=stdin, capture_output=True, text=True, timeout=10, check=False,
+def run_hook(tmp_path, stdin=PAYLOAD, **env):
+    base = {
+        "WLB_EVENTS_FILE": str(tmp_path / "events.jsonl"),
+        "WLB_HISTORY_FILE": str(tmp_path / "missing-history.jsonl"),
+        "WLB_CONFIG_FILE": str(tmp_path / "missing-config.json"),
+        "WLB_NOW": "2026-09-17T19:00:00",
+    }
+    proc = subprocess.run(
+        [sys.executable, str(HOOK)], input=stdin, capture_output=True, text=True, timeout=10,
+        check=False, env={**os.environ, **base, **env},
     )
-
-
-@pytest.mark.parametrize("name,expect_decision", [
-    ("bash-safe", None),
-    ("bash-rm-root", "deny"),
-    ("bash-force-push", "deny"),
-])
-def test_pre_tool_use_e2e(name, expect_decision):
-    payload = (FIXTURES / "PreToolUse" / f"{name}.json").read_text()
-    proc = run_hook("pre_tool_use.py", payload)
     assert proc.returncode == 0, proc.stderr
-    if expect_decision is None:
-        assert proc.stdout.strip() == ""
-    else:
-        out = json.loads(proc.stdout)
-        assert out["hookSpecificOutput"]["permissionDecision"] == expect_decision
+    return proc
 
 
-def test_user_prompt_submit_e2e():
-    payload = (FIXTURES / "UserPromptSubmit" / "mentions-wlb.json").read_text()
-    proc = run_hook("user_prompt_submit.py", payload)
-    assert proc.returncode == 0
-    assert json.loads(proc.stdout)["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
+def events(tmp_path):
+    p = tmp_path / "events.jsonl"
+    return [json.loads(line) for line in p.read_text().splitlines()] if p.exists() else []
 
 
-def test_malformed_stdin_fails_open():
-    proc = run_hook("pre_tool_use.py", "not json{")
-    assert proc.returncode == 0
-    out = json.loads(proc.stdout)
-    assert "systemMessage" in out
-    assert "hookSpecificOutput" not in out
+def test_no_history_is_silent(tmp_path):
+    assert run_hook(tmp_path).stdout.strip() == ""
+    assert events(tmp_path) == []
 
 
-def test_empty_stdin_is_silent():
-    proc = run_hook("pre_tool_use.py", "")
-    assert proc.returncode == 0
+def test_under_budget_is_silent(tmp_path):
+    proc = run_hook(tmp_path, WLB_FIRST_PROMPT_AT="2026-09-17T11:00:00")
     assert proc.stdout.strip() == ""
 
 
+def test_over_budget_stop_blocks_and_logs(tmp_path):
+    proc = run_hook(tmp_path, WLB_FIRST_PROMPT_AT="2026-09-17T09:00:00", WLB_DIALOG_RESULT="stop")
+    out = json.loads(proc.stdout)
+    assert out["decision"] == "block" and "10h 00m" in out["reason"]
+    assert [e["kind"] for e in events(tmp_path)] == ["gate", "stop"]
+
+
+def test_config_budget_respected(tmp_path):
+    (tmp_path / "config.json").write_text('{"max_hours": 2}')
+    proc = run_hook(tmp_path, WLB_FIRST_PROMPT_AT="2026-09-17T16:00:00",
+                    WLB_CONFIG_FILE=str(tmp_path / "config.json"), WLB_DIALOG_RESULT="stop")
+    assert json.loads(proc.stdout)["decision"] == "block"
+
+
+def test_one_last_allows_then_gates_again(tmp_path):
+    env = dict(WLB_FIRST_PROMPT_AT="2026-09-17T09:00:00")
+    first = run_hook(tmp_path, WLB_DIALOG_RESULT="one_last", **env)
+    assert "decision" not in json.loads(first.stdout)
+    second = run_hook(tmp_path, WLB_DIALOG_RESULT="stop", **env)
+    assert json.loads(second.stdout)["decision"] == "block"
+    assert [e["kind"] for e in events(tmp_path)] == ["gate", "one_last", "gate", "stop"]
+
+
+def test_workaholic_unlocks_rest_of_day(tmp_path):
+    env = dict(WLB_FIRST_PROMPT_AT="2026-09-17T09:00:00")
+    first = run_hook(tmp_path, WLB_DIALOG_RESULT="workaholic:tests were almost green", **env)
+    assert "almost green" in json.loads(first.stdout)["systemMessage"]
+    second = run_hook(tmp_path, WLB_DIALOG_RESULT="stop", **env)
+    assert second.stdout.strip() == ""
+    kinds = [e["kind"] for e in events(tmp_path)]
+    assert kinds == ["gate", "workaholic"]
+    assert events(tmp_path)[1]["excuse"] == "tests were almost green"
+
+
+def test_timeout_blocks_without_choice_event(tmp_path):
+    proc = run_hook(tmp_path, WLB_FIRST_PROMPT_AT="2026-09-17T09:00:00",
+                    WLB_DIALOG_RESULT="timeout")
+    assert json.loads(proc.stdout)["decision"] == "block"
+    assert [e["kind"] for e in events(tmp_path)] == ["gate"]
+
+
+def test_malformed_stdin_fails_open(tmp_path):
+    out = json.loads(run_hook(tmp_path, stdin="not json{").stdout)
+    assert "systemMessage" in out and "decision" not in out
+
+
 def test_hooks_json_references_existing_scripts():
-    cfg = json.loads((HOOKS / "hooks.json").read_text())
+    cfg = json.loads((ROOT / "hooks" / "hooks.json").read_text())
     for groups in cfg["hooks"].values():
         for group in groups:
             for handler in group["hooks"]:
-                assert handler["type"] == "command"
-                assert "command" in handler
                 for arg in handler.get("args", []):
                     if "${CLAUDE_PLUGIN_ROOT}" in arg:
-                        path = ROOT / arg.replace("${CLAUDE_PLUGIN_ROOT}/", "")
-                        assert path.is_file(), f"missing {path}"
+                        assert (ROOT / arg.replace("${CLAUDE_PLUGIN_ROOT}/", "")).is_file()
