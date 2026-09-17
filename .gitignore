@@ -5,3 +5,5 @@ __pycache__/
 .venv/
 uv.lock
 .claude/settings.local.json
+dashboard/node_modules/
+dashboard/dist/
