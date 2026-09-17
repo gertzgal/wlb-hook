@@ -1,4 +1,4 @@
-export type Kind = "gate" | "stop" | "one_last" | "workaholic";
+export type Kind = "gate" | "stop" | "one_last" | "workaholic" | "usage";
 
 export interface WlbEvent {
   ts: string;
@@ -6,6 +6,7 @@ export interface WlbEvent {
   kind: Kind;
   worked_hours: number;
   budget_hours: number;
+  usage_hours?: number; // "usage" events only: Claude screen time that day
   excuse?: string;
   session_id: string;
   cwd: string;
@@ -19,6 +20,7 @@ export interface DaySummary {
   state: DayState;
   events: WlbEvent[];
   peakHours: number;
+  usageHours: number; // Claude screen time that day
   budget: number;
   excuse?: string;
   excuseTime?: string;
@@ -73,7 +75,12 @@ export function summarizeDay(date: string, events: WlbEvent[]): DaySummary {
   let excuse: string | undefined;
   let excuseTime: string | undefined;
   let project: string | undefined;
+  let usage = 0;
   for (const e of events) {
+    if (e.kind === "usage") {
+      usage += e.usage_hours ?? 0;
+      continue;
+    }
     peak = Math.max(peak, e.worked_hours ?? 0);
     if (e.budget_hours) budget = e.budget_hours;
     if (e.cwd) project = e.cwd.split("/").filter(Boolean).pop();
@@ -84,14 +91,15 @@ export function summarizeDay(date: string, events: WlbEvent[]): DaySummary {
       excuseTime = e.ts;
     }
   }
+  const gateEvents = events.filter((e) => e.kind !== "usage");
   let state: DayState = "quiet";
-  if (events.length) {
+  if (gateEvents.length) {
     if (choices.workaholic) state = "unlocked";
     else if (choices.stop) state = "stopped";
     else if (choices.one_last) state = "one_last";
     else state = "ignored";
   }
-  return { date, state, events, peakHours: peak, budget, excuse, excuseTime, project, gates, choices };
+  return { date, state, events: gateEvents, peakHours: peak, usageHours: usage, budget, excuse, excuseTime, project, gates, choices };
 }
 
 export interface Week {
@@ -128,6 +136,8 @@ export interface Stats {
   totalWorkDays: number;
   choices: { stop: number; one_last: number; workaholic: number };
   ignored: number;
+  avgUsageHours: number; // mean Claude screen time over past days with any usage
+  usageDays: number;
   topExcuse?: { text: string; count: number; date: string };
   excuses: { text: string; date: string; ts: string; hours: number }[];
 }
@@ -169,5 +179,7 @@ export function computeStats(weeks: Week[], today: Date): Stats {
     if (!top || c.count > top.count || (c.count === top.count && c.date > top.date)) top = { text, ...c };
   }
   const weekdays = past.filter((d) => !isWeekend(fromIso(d.date))).length;
-  return { streakDays: streak, overworkDays: overwork, totalWorkDays: weekdays, choices, ignored, topExcuse: top, excuses };
+  const used = past.filter((d) => d.usageHours > 0);
+  const avgUsage = used.length ? used.reduce((a, d) => a + d.usageHours, 0) / used.length : 0;
+  return { streakDays: streak, overworkDays: overwork, totalWorkDays: weekdays, choices, ignored, avgUsageHours: avgUsage, usageDays: used.length, topExcuse: top, excuses };
 }
