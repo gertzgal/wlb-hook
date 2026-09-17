@@ -74,15 +74,6 @@ export default function App() {
 
   const sel = selected ? weeks.flatMap((w) => w.days).find((d) => d.date === selected) : undefined;
 
-  const balanceLine = (() => {
-    const { streakDays, overworkDays, totalWorkDays } = stats;
-    if (!totalWorkDays) return "Nothing on the record yet.";
-    if (streakDays >= 5) return `You've closed the laptop on time ${streakDays} workdays in a row.`;
-    if (streakDays > 0) return `${streakDays} ${streakDays === 1 ? "day" : "days"} within budget and counting.`;
-    if (overworkDays === 0) return "Six clean weeks. The gate never opened.";
-    return "The gate opened today. Tomorrow is a fresh day.";
-  })();
-
   return (
     <div
       className={"page" + (dragging ? " dragging" : "")}
@@ -91,18 +82,8 @@ export default function App() {
       onDrop={onDrop}
     >
       <header className="masthead">
-        <div className="masthead-left">
-          <p className="kicker">Your last six weeks with Claude Code</p>
-          <h1 className="balance">{balanceLine}</h1>
-        </div>
-        <div className="masthead-right">
-          <p className="range">{range}</p>
-          <p className="source" title={src.label}>
-            <span className={"dot" + (src.live ? " live" : "")} />
-            {src.live ? "watching" : "loaded"} <span className="path">{shortPath(src.label)}</span>
-            {!src.exists && <span className="warn"> · file not found yet</span>}
-          </p>
-        </div>
+        <p className="kicker">Your last six weeks with Claude Code</p>
+        <p className="range">{range}</p>
       </header>
 
       {hero && (
@@ -193,6 +174,7 @@ export default function App() {
       )}
 
       <footer className="foot">
+        {!src.exists && <p className="warn">No events file at {shortPath(src.label)} yet. The first gate will create it.</p>}
         <p>Quiet days mean you stayed within budget, or didn't open Claude at all. Drop any <code>events.jsonl</code> onto the page to read a different record.</p>
       </footer>
 
