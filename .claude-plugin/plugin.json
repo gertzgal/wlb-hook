@@ -1,0 +1,6 @@
+{
+  "name": "wlb-hook",
+  "version": "0.1.0",
+  "description": "Claude Code hook plugin boilerplate: pure decision core, thin stdin/stdout shims, fixture-driven tests.",
+  "author": { "name": "gertzgal" }
+}
